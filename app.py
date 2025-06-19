@@ -23,19 +23,25 @@ def scrape_navigation(job_id, base_url, navigation_selector, max_depth=2):
             response = requests.get(url)
             soup = BeautifulSoup(response.text, 'lxml')
 
+            content_area = soup.select_one('main, .content, .docs-content') or soup
+            text = content_area.get_text(separator="\n").strip()
+
             content = {
                 'url': url,
-                'title': soup.title.string if soup.title else "No title",
-                'content': soup.get_text()[:5000]  # expanded content length
+                'title': soup.title.string.strip() if soup.title else "No title",
+                'content': text[:5000]  # Expand limit as needed
             }
             content_results.append(content)
 
-            # find navigation links clearly
-            nav_links = [urljoin(base_url, a['href']) for a in soup.select(navigation_selector + ' a[href]')]
-            nav_links = [link for link in nav_links if urlparse(link).netloc == urlparse(base_url).netloc]
+            nav_links = [
+                urljoin(base_url, a['href']) 
+                for a in soup.select(f'{navigation_selector} a[href]')
+                if urlparse(urljoin(base_url, a['href'])).netloc == urlparse(base_url).netloc
+            ]
 
             for link in nav_links:
-                scrape_recursive(link, depth + 1)
+                if link not in visited:
+                    scrape_recursive(link, depth + 1)
 
         except Exception as e:
             jobs[job_id]['errors'].append(str(e))
