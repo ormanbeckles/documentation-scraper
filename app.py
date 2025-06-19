@@ -9,11 +9,21 @@ import uuid
 import threading
 from urllib.parse import urljoin, urlparse
 import time
+import re
 
 app = Flask(__name__)
 CORS(app)
 
 jobs = {}
+
+def clean_text(text):
+    return re.sub(r'\s+', ' ', text).strip()
+
+def summarize_content(text):
+    # Basic summarization: extract first 3 sentences
+    sentences = re.split(r'(?<=[.!?]) +', text)
+    summary = ' '.join(sentences[:3])
+    return summary
 
 def scrape_navigation(job_id, base_url, navigation_selector, max_depth=2):
     options = Options()
@@ -23,7 +33,7 @@ def scrape_navigation(job_id, base_url, navigation_selector, max_depth=2):
 
     driver = webdriver.Chrome(service=Service(ChromeDriverManager().install()), options=options)
     visited = set()
-    content_results = []
+    summarized_results = []
 
     def scrape_recursive(url, depth):
         if depth > max_depth or url in visited:
@@ -31,14 +41,16 @@ def scrape_navigation(job_id, base_url, navigation_selector, max_depth=2):
         visited.add(url)
         try:
             driver.get(url)
-            time.sleep(2)  # wait for JS to load fully
+            time.sleep(2)  # Ensure JS loaded
             title = driver.title
-            body = driver.find_element(By.TAG_NAME, "body").text
-            
-            content_results.append({
+            body_text = driver.find_element(By.TAG_NAME, "body").text
+            clean_body_text = clean_text(body_text)
+            summary = summarize_content(clean_body_text)
+
+            summarized_results.append({
                 'url': url,
                 'title': title,
-                'content': body[:5000]
+                'summary': summary
             })
 
             nav_elements = driver.find_elements(By.CSS_SELECTOR, f"{navigation_selector} a[href]")
@@ -59,11 +71,11 @@ def scrape_navigation(job_id, base_url, navigation_selector, max_depth=2):
     driver.quit()
 
     jobs[job_id]['status'] = 'completed'
-    jobs[job_id]['result'] = content_results
+    jobs[job_id]['result'] = summarized_results
 
 @app.route("/")
 def home():
-    return "Documentation scraper is online!"
+    return "Documentation scraper with summarization is online!"
 
 @app.route("/scrape", methods=["POST"])
 def scrape():
