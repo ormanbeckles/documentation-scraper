@@ -1,10 +1,12 @@
 from flask import Flask, request, jsonify
 from flask_cors import CORS
-import requests
-from bs4 import BeautifulSoup
-import uuid
-import threading
+from selenium import webdriver
+from selenium.webdriver.chrome.options import Options
+from webdriver_manager.chrome import ChromeDriverManager
+from selenium.webdriver.common.by import By
+import uuid, threading
 from urllib.parse import urljoin, urlparse
+import time
 
 app = Flask(__name__)
 CORS(app)
@@ -12,6 +14,12 @@ CORS(app)
 jobs = {}
 
 def scrape_navigation(job_id, base_url, navigation_selector, max_depth=2):
+    options = Options()
+    options.add_argument('--headless')
+    options.add_argument('--no-sandbox')
+    options.add_argument('--disable-dev-shm-usage')
+    
+    driver = webdriver.Chrome(ChromeDriverManager().install(), options=options)
     visited = set()
     content_results = []
 
@@ -20,23 +28,22 @@ def scrape_navigation(job_id, base_url, navigation_selector, max_depth=2):
             return
         visited.add(url)
         try:
-            response = requests.get(url)
-            soup = BeautifulSoup(response.text, 'lxml')
-
-            content_area = soup.select_one('main, .content, .docs-content') or soup
-            text = content_area.get_text(separator="\n").strip()
-
-            content = {
+            driver.get(url)
+            time.sleep(2)  # wait for JS to load
+            title = driver.title
+            body = driver.find_element(By.TAG_NAME, "body").text
+            
+            content_results.append({
                 'url': url,
-                'title': soup.title.string.strip() if soup.title else "No title",
-                'content': text[:5000]  # Expand limit as needed
-            }
-            content_results.append(content)
+                'title': title,
+                'content': body[:5000]
+            })
 
+            nav_elements = driver.find_elements(By.CSS_SELECTOR, f"{navigation_selector} a[href]")
             nav_links = [
-                urljoin(base_url, a['href']) 
-                for a in soup.select(f'{navigation_selector} a[href]')
-                if urlparse(urljoin(base_url, a['href'])).netloc == urlparse(base_url).netloc
+                urljoin(base_url, a.get_attribute('href'))
+                for a in nav_elements
+                if urlparse(urljoin(base_url, a.get_attribute('href'))).netloc == urlparse(base_url).netloc
             ]
 
             for link in nav_links:
@@ -47,6 +54,8 @@ def scrape_navigation(job_id, base_url, navigation_selector, max_depth=2):
             jobs[job_id]['errors'].append(str(e))
 
     scrape_recursive(base_url, 1)
+    driver.quit()
+
     jobs[job_id]['status'] = 'completed'
     jobs[job_id]['result'] = content_results
 
