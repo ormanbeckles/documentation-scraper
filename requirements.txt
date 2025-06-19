@@ -7,3 +7,5 @@ selenium
 python-dotenv
 flask-cors
 gunicorn
+selenium
+webdriver-manager
