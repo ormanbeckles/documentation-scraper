@@ -22,51 +22,53 @@ def scrape_navigation(job_id, url, selector, depth):
     options.add_argument('--disable-dev-shm-usage')
 
     driver = webdriver.Chrome(service=Service(ChromeDriverManager().install()), options=options)
-    
-    scrape_jobs[job_id] = {"status": "in_progress", "content": []}
-    
+
+    scrape_jobs[job_id] = {"status": "in_progress", "content": [], "logs": []}
+
     try:
+        scrape_jobs[job_id]["logs"].append(f"Opening initial URL: {url}")
         driver.get(url)
-        time.sleep(5)  # Wait for page load
-        
-        links = driver.find_elements(By.CSS_SELECTOR, f"{selector} a")
+        time.sleep(5)
 
-        num_links = min(len(links), depth) if depth else len(links)
+        links = driver.find_elements(By.CSS_SELECTOR, selector)
+        scrape_jobs[job_id]["logs"].append(f"Found {len(links)} links using selector '{selector}'.")
 
-        for i in range(num_links):
-            href = links[i].get_attribute('href')
-            
-            if not href:
-                continue
-            
+        for idx, link in enumerate(links[:depth if depth else len(links)]):
+            href = link.get_attribute('href')
+            scrape_jobs[job_id]["logs"].append(f"Navigating to link {idx + 1}: {href}")
             driver.get(href)
-            time.sleep(5)  # Wait for each page to load completely
-            
+            time.sleep(5)
+
+            content_text = driver.find_element(By.TAG_NAME, 'body').text[:2000]
+
             page_content = {
                 "title": driver.title,
                 "url": href,
-                "summary": driver.find_element(By.TAG_NAME, 'body').text[:2000]  # first 2000 chars
+                "summary": content_text
             }
 
             scrape_jobs[job_id]["content"].append(page_content)
-        
+            scrape_jobs[job_id]["logs"].append(f"Scraped content from: {href}")
+
         scrape_jobs[job_id]["status"] = "completed"
-        
+
     except Exception as e:
         scrape_jobs[job_id]["status"] = "error"
         scrape_jobs[job_id]["error"] = str(e)
-    
+        scrape_jobs[job_id]["logs"].append(f"Error: {str(e)}")
+
     finally:
         driver.quit()
+        scrape_jobs[job_id]["logs"].append("Browser session ended.")
 
 @app.route('/scrape', methods=['POST'])
 def start_scrape():
     data = request.json
-    url = data.get('url')
-    selector = data.get('navigation_selector', 'body')
-    max_depth = int(data.get('max_depth', 0))
-
     job_id = str(uuid.uuid4())
+    url = data.get('url')
+    selector = data.get('navigation_selector', 'body a')
+    max_depth = data.get('max_depth', 0)
+
     threading.Thread(target=scrape_navigation, args=(job_id, url, selector, max_depth)).start()
 
     return jsonify({"job_id": job_id, "status": "started"})
@@ -79,7 +81,8 @@ def check_status(job_id):
     return jsonify({
         "job_id": job_id,
         "status": job["status"],
-        "error": job.get("error", "")
+        "errors": job.get("error", []),
+        "logs": job.get("logs", [])
     })
 
 @app.route('/download/<job_id>', methods=['GET'])
