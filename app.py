@@ -14,12 +14,21 @@ CORS(app)
 
 scrape_jobs = {}
 
-def scrape_navigation(job_id, url, selector, depth):
-    scrape_jobs[job_id] = {
-        "status": "in_progress",
-        "content": [],
-        "logs": []
-    }
+COMMON_SELECTORS = ['#sidebar a', '.sidebar a', '.navigation a', 'nav a', 'main a', 'a']
+
+def best_selector(driver):
+    best_sel = 'a'
+    max_links = 0
+    for sel in COMMON_SELECTORS:
+        links = driver.find_elements(By.CSS_SELECTOR, sel)
+        valid_links = [link for link in links if link.get_attribute('href')]
+        if len(valid_links) > max_links:
+            best_sel = sel
+            max_links = len(valid_links)
+    return best_sel
+
+def scrape_navigation(job_id, url, depth):
+    scrape_jobs[job_id] = {"status": "in_progress", "content": [], "logs": []}
 
     options = Options()
     options.add_argument('--headless=new')
@@ -32,23 +41,19 @@ def scrape_navigation(job_id, url, selector, depth):
 
     try:
         driver.get(url)
-        time.sleep(8)  # Allow dynamic content to load clearly
+        time.sleep(8)
 
+        selector = best_selector(driver)
         links = driver.find_elements(By.CSS_SELECTOR, selector)
-        scrape_jobs[job_id]["logs"].append(
-            f"Found {len(links)} links using '{selector}'."
-        )
+        valid_links = [link for link in links if link.get_attribute('href')]
+        scrape_jobs[job_id]["logs"].append(f"Auto-selected '{selector}' with {len(valid_links)} valid links.")
 
         scraped = 0
-        for link in links:
+        for link in valid_links:
             if scraped >= depth:
                 break
 
             href = link.get_attribute('href')
-            if not href or "javascript:void(0)" in href:
-                scrape_jobs[job_id]["logs"].append("Skipped invalid link.")
-                continue
-
             scrape_jobs[job_id]["logs"].append(f"Visiting: {href}")
             driver.get(href)
             time.sleep(5)
@@ -59,7 +64,6 @@ def scrape_navigation(job_id, url, selector, depth):
                 "summary": driver.find_element(By.TAG_NAME, 'body').text[:1500]
             }
             scrape_jobs[job_id]["content"].append(content)
-            scrape_jobs[job_id]["logs"].append(f"Scraped: {href}")
             scraped += 1
 
             driver.get(url)
@@ -81,13 +85,11 @@ def scrape_navigation(job_id, url, selector, depth):
 def start_scrape():
     data = request.json
     job_id = str(uuid.uuid4())
-    
     threading.Thread(
         target=scrape_navigation,
         args=(
             job_id,
             data.get('url'),
-            data.get('navigation_selector', 'a'),
             data.get('max_depth', 1)
         )
     ).start()
