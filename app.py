@@ -21,31 +21,31 @@ def scrape_navigation(job_id, url, selector, depth):
     options.add_argument('--disable-gpu')
     options.add_argument('--no-sandbox')
     options.add_argument('--disable-dev-shm-usage')
-    
+
     driver = webdriver.Chrome(service=Service(ChromeDriverManager().install()), options=options)
-    
+    actions = ActionChains(driver)
     scrape_jobs[job_id] = {"status": "in_progress", "content": [], "logs": []}
-    
+
     try:
         driver.get(url)
-        time.sleep(10)  # Ensure page is fully loaded
+        time.sleep(10)
 
-        links = driver.find_elements(By.CSS_SELECTOR, selector)
-        scrape_jobs[job_id]["logs"].append(f"Found {len(links)} clickable links using selector '{selector}'.")
+        initial_links_count = len(driver.find_elements(By.CSS_SELECTOR, selector))
+        scrape_jobs[job_id]["logs"].append(f"Initially found {initial_links_count} clickable links with selector '{selector}'.")
 
-        actions = ActionChains(driver)
-
-        count = 0
-        for idx, link in enumerate(links):
-            if depth and count >= depth:
+        for idx in range(min(initial_links_count, depth)):
+            links = driver.find_elements(By.CSS_SELECTOR, selector)  # Re-fetch links each iteration
+            if idx >= len(links):
+                scrape_jobs[job_id]["logs"].append(f"Index {idx} out of range after re-fetching links.")
                 break
 
-            link_text = link.text
+            link = links[idx]
+            link_text = link.text or f"Link {idx+1}"
             scrape_jobs[job_id]["logs"].append(f"Clicking link {idx+1}: '{link_text}'")
 
-            driver.execute_script("arguments[0].scrollIntoView();", link)
+            driver.execute_script("arguments[0].scrollIntoView(true);", link)
             actions.move_to_element(link).click().perform()
-            time.sleep(5)  # Wait for content to load after click
+            time.sleep(5)
 
             page_content = {
                 "title": driver.title,
@@ -56,15 +56,16 @@ def scrape_navigation(job_id, url, selector, depth):
             scrape_jobs[job_id]["content"].append(page_content)
             scrape_jobs[job_id]["logs"].append(f"Scraped content from link '{link_text}'.")
 
-            count += 1
+            driver.get(url)  # Return to initial URL after each scrape
+            time.sleep(5)
 
         scrape_jobs[job_id]["status"] = "completed"
-        
+
     except Exception as e:
         scrape_jobs[job_id]["status"] = "error"
         scrape_jobs[job_id]["error"] = str(e)
         scrape_jobs[job_id]["logs"].append(f"Error: {str(e)}")
-    
+
     finally:
         scrape_jobs[job_id]["logs"].append("Browser session ended.")
         driver.quit()
@@ -75,7 +76,7 @@ def start_scrape():
     job_id = str(uuid.uuid4())
     url = data.get('url')
     selector = data.get('navigation_selector', '#sidebar a')
-    max_depth = data.get('max_depth', 0)
+    max_depth = data.get('max_depth', 3)
 
     threading.Thread(target=scrape_navigation, args=(job_id, url, selector, max_depth)).start()
 
