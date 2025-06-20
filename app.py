@@ -23,6 +23,10 @@ def scrape_navigation(job_id, url, selector, depth):
     options.add_argument('--disable-gpu')
     options.add_argument('--no-sandbox')
     options.add_argument('--disable-dev-shm-usage')
+    options.add_argument('--single-process')
+    options.add_argument('--disable-extensions')
+    options.add_argument('--disable-dev-tools')
+    options.add_argument('--disable-browser-side-navigation')
 
     driver = webdriver.Chrome(service=Service(ChromeDriverManager().install()), options=options)
     wait = WebDriverWait(driver, 20)
@@ -32,27 +36,27 @@ def scrape_navigation(job_id, url, selector, depth):
     try:
         driver.get(url)
         wait.until(EC.presence_of_element_located((By.CSS_SELECTOR, selector)))
-        scrape_jobs[job_id]["logs"].append(f"Page loaded and found elements matching '{selector}'.")
+        scrape_jobs[job_id]["logs"].append(f"Loaded page and found elements matching '{selector}'.")
 
-        initial_links = driver.find_elements(By.CSS_SELECTOR, selector)
-        scrape_jobs[job_id]["logs"].append(f"Initially found {len(initial_links)} clickable links with selector '{selector}'.")
+        links = driver.find_elements(By.CSS_SELECTOR, selector)
+        scrape_jobs[job_id]["logs"].append(f"Initially found {len(links)} clickable links with selector '{selector}'.")
 
-        for idx in range(min(len(initial_links), depth)):
-            links = driver.find_elements(By.CSS_SELECTOR, selector)
-            if idx >= len(links):
-                scrape_jobs[job_id]["logs"].append(f"Index {idx} out of range after re-fetching links.")
+        scraped = 0
+        for idx, link in enumerate(links):
+            if scraped >= depth:
+                break
+
+            href = link.get_attribute('href')
+            link_text = link.text or href or f"Link {idx+1}"
+            scrape_jobs[job_id]["logs"].append(f"Preparing to visit: '{link_text}'")
+
+            if not href or "javascript:void(0)" in href:
+                scrape_jobs[job_id]["logs"].append(f"Skipping non-navigable or empty link: '{link_text}'")
                 continue
 
-            link = links[idx]
-            link_text = link.text or f"Link {idx+1}"
-            scrape_jobs[job_id]["logs"].append(f"Clicking link {idx+1}: '{link_text}'")
-
-            driver.execute_script("arguments[0].scrollIntoView({behavior: 'smooth', block: 'center'});", link)
-            wait.until(EC.element_to_be_clickable(link))
-            actions.move_to_element(link).click().perform()
-
+            driver.get(href)
             wait.until(lambda d: d.execute_script('return document.readyState') == 'complete')
-            time.sleep(3)  # Allow extra time for dynamic elements
+            time.sleep(5)  # Give extra time for heavy JS rendering
 
             page_content = {
                 "title": driver.title,
@@ -61,11 +65,12 @@ def scrape_navigation(job_id, url, selector, depth):
             }
 
             scrape_jobs[job_id]["content"].append(page_content)
-            scrape_jobs[job_id]["logs"].append(f"Scraped content from link '{link_text}'.")
+            scrape_jobs[job_id]["logs"].append(f"Scraped content from '{link_text}'.")
+            scraped += 1
 
             driver.get(url)
             wait.until(lambda d: d.execute_script('return document.readyState') == 'complete')
-            time.sleep(3)
+            time.sleep(5)
 
         scrape_jobs[job_id]["status"] = "completed"
 
@@ -84,7 +89,7 @@ def start_scrape():
     job_id = str(uuid.uuid4())
     url = data.get('url')
     selector = data.get('navigation_selector', '#sidebar a')
-    max_depth = data.get('max_depth', 3)
+    max_depth = data.get('max_depth', 2)
 
     threading.Thread(target=scrape_navigation, args=(job_id, url, selector, max_depth)).start()
 
