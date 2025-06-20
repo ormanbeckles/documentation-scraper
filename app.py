@@ -5,7 +5,9 @@ from selenium.webdriver.chrome.service import Service
 from selenium.webdriver.chrome.options import Options
 from selenium.webdriver.common.by import By
 from webdriver_manager.chrome import ChromeDriverManager
-import threading, uuid, time
+import threading
+import uuid
+import time
 
 app = Flask(__name__)
 CORS(app)
@@ -13,37 +15,41 @@ CORS(app)
 scrape_jobs = {}
 
 def scrape_navigation(job_id, url, selector, depth):
-    scrape_jobs[job_id] = {"status": "in_progress", "content": [], "logs": []}
+    scrape_jobs[job_id] = {
+        "status": "in_progress",
+        "content": [],
+        "logs": []
+    }
 
     options = Options()
     options.add_argument('--headless=new')
     options.add_argument('--disable-gpu')
     options.add_argument('--no-sandbox')
     options.add_argument('--disable-dev-shm-usage')
-    options.add_argument('--single-process')
-    options.add_argument('--disable-extensions')
-    options.page_load_strategy = 'eager'  # Faster loads (no images/CSS)
+    options.page_load_strategy = 'eager'
 
     driver = webdriver.Chrome(service=Service(ChromeDriverManager().install()), options=options)
 
     try:
-        driver.set_page_load_timeout(30)
         driver.get(url)
-        time.sleep(10)  # Allow JS to load clearly
+        time.sleep(8)  # Allow dynamic content to load clearly
 
         links = driver.find_elements(By.CSS_SELECTOR, selector)
-        scrape_jobs[job_id]["logs"].append(f"Found {len(links)} links with selector '{selector}'.")
+        scrape_jobs[job_id]["logs"].append(
+            f"Found {len(links)} links using '{selector}'."
+        )
 
         scraped = 0
         for link in links:
             if scraped >= depth:
                 break
+
             href = link.get_attribute('href')
             if not href or "javascript:void(0)" in href:
-                scrape_jobs[job_id]["logs"].append(f"Skipping invalid link.")
+                scrape_jobs[job_id]["logs"].append("Skipped invalid link.")
                 continue
 
-            scrape_jobs[job_id]["logs"].append(f"Visiting link: {href}")
+            scrape_jobs[job_id]["logs"].append(f"Visiting: {href}")
             driver.get(href)
             time.sleep(5)
 
@@ -75,6 +81,7 @@ def scrape_navigation(job_id, url, selector, depth):
 def start_scrape():
     data = request.json
     job_id = str(uuid.uuid4())
+    
     threading.Thread(
         target=scrape_navigation,
         args=(
